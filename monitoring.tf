@@ -37,8 +37,6 @@ resource "aws_cloudwatch_metric_alarm" "ec2_cpu_high" {
 
   # アラーム状態になった時のアクション（SNSへの通知）
   alarm_actions       = [aws_sns_topic.cpu_alarm_topic.arn]
-  # データ不足等の時も通知したい場合は以下も設定可能ですが、今回はCFnに合わせてalarmのみ
-  # ok_actions          = [aws_sns_topic.cpu_alarm_topic.arn]
 }
 
 # ----------------------------

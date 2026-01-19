@@ -1,0 +1,42 @@
+# ----------------------------
+# SNS Topic
+# ----------------------------
+resource "aws_sns_topic" "cpu_alarm_topic" {
+  name         = "aws-study-cpu-alarm-topic"
+  display_name = "AWS Study Alarm"
+}
+
+# ----------------------------
+# SNS Subscription (Email)
+# ----------------------------
+resource "aws_sns_topic_subscription" "cpu_alarm_email" {
+  topic_arn = aws_sns_topic.cpu_alarm_topic.arn
+  protocol  = "email"
+  endpoint  = var.alert_email # variables.tfで定義した変数を利用
+}
+
+# ----------------------------
+# CloudWatch Alarm (EC2 CPU)
+# ----------------------------
+resource "aws_cloudwatch_metric_alarm" "ec2_cpu_high" {
+  alarm_name          = "aws-study-ec2-cpu-high"
+  alarm_description   = "Alarm when CPU exceeds 10%"
+  namespace           = "AWS/EC2"
+  metric_name         = "CPUUtilization"
+  
+  # 監視対象の特定（compute.tfで作ったEC2のIDを参照）
+  dimensions = {
+    InstanceId = aws_instance.study_ec2.id
+  }
+
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  period              = 300
+  statistic           = "Average"
+  threshold           = 10
+
+  # アラーム状態になった時のアクション（SNSへの通知）
+  alarm_actions       = [aws_sns_topic.cpu_alarm_topic.arn]
+  # データ不足等の時も通知したい場合は以下も設定可能ですが、今回はCFnに合わせてalarmのみ
+  # ok_actions          = [aws_sns_topic.cpu_alarm_topic.arn]
+}

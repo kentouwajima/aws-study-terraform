@@ -40,3 +40,28 @@ resource "aws_cloudwatch_metric_alarm" "ec2_cpu_high" {
   # データ不足等の時も通知したい場合は以下も設定可能ですが、今回はCFnに合わせてalarmのみ
   # ok_actions          = [aws_sns_topic.cpu_alarm_topic.arn]
 }
+
+# ----------------------------
+# CloudWatch Alarm (WAF Blocked)
+# ----------------------------
+resource "aws_cloudwatch_metric_alarm" "waf_blocked_alarm" {
+  alarm_name          = "aws-study-waf-blocked"
+  alarm_description   = "Alarm when WAF blocks any request"
+  namespace           = "AWS/WAFV2"
+  metric_name         = "BlockedRequests"
+  
+  dimensions = {
+    WebACL = aws_wafv2_web_acl.study_web_acl.name
+    Region = "ap-northeast-1"
+    Rule   = "ALL"
+  }
+
+  comparison_operator = "GreaterThanThreshold"
+  evaluation_periods  = 1
+  period              = 60
+  statistic           = "Sum"
+  threshold           = 0
+  treat_missing_data  = "notBreaching"
+
+  alarm_actions       = [aws_sns_topic.cpu_alarm_topic.arn]
+}

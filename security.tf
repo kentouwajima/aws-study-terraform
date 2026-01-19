@@ -65,3 +65,33 @@ resource "aws_security_group" "ec2_sg" {
     Name = "aws-study-ec2-sg"
   }
 }
+
+# ----------------------------
+# Security Group for RDS
+# ----------------------------
+resource "aws_security_group" "rds_sg" {
+  name        = "aws-study-rds-sg"
+  description = "Security group for aws-study-rds"
+  vpc_id      = aws_vpc.study_vpc.id
+
+  # Inbound Rules (MySQL/Aurora 3306 from EC2 SG)
+  # EC2のセキュリティグループIDをソースに指定
+  ingress {
+    from_port       = 3306
+    to_port         = 3306
+    protocol        = "tcp"
+    security_groups = [aws_security_group.ec2_sg.id]
+  }
+
+  # Outbound Rules (Allow All)
+  egress {
+    from_port   = 0
+    to_port     = 0
+    protocol    = "-1"
+    cidr_blocks = ["0.0.0.0/0"]
+  }
+
+  tags = {
+    Name = "aws-study-rds-sg"
+  }
+}

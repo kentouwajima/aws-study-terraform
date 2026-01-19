@@ -1,0 +1,10 @@
+# Terraform Variables Example File
+# Copy this file to terraform.tfvars and set your actual values
+# terraform.tfvars should be in .gitignore and never committed to version control
+
+# RDS Database Password
+# Set a secure password for the RDS database master user
+db_password = "CHANGE_ME_TO_YOUR_SECURE_PASSWORD"
+
+# Alert Email (optional - has default value)
+# alert_email = "your-email@example.com"

@@ -26,7 +26,7 @@ resource "aws_db_instance" "study_rds" {
   db_name        = "awsstudy"
 
   username = "root"
-  password = "rootroot" # 学習用のためハードコード（本番ではSecretsManager等を使用予定）
+  password = var.db_password
 
   allocated_storage     = 20
   max_allocated_storage = 1000

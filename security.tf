@@ -4,7 +4,7 @@
 resource "aws_security_group" "alb_sg" {
   name        = "aws-study-alb-sg"
   description = "Security group for ALB"
-  vpc_id      = aws_vpc.study_vpc.id  # network.tfのVPCを参照
+  vpc_id      = aws_vpc.study_vpc.id # network.tfのVPCを参照
 
   # Inbound Rules (HTTP 80)
   ingress {

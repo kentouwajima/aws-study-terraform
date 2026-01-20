@@ -15,7 +15,7 @@ resource "aws_vpc" "study_vpc" {
 # Internet Gateway
 # ----------------------------
 resource "aws_internet_gateway" "igw" {
-  vpc_id = aws_vpc.study_vpc.id  # !Ref StudyVPC の代わり
+  vpc_id = aws_vpc.study_vpc.id # !Ref StudyVPC の代わり
 
   tags = {
     Name = "aws-study-igw"

@@ -5,12 +5,12 @@ resource "aws_lb" "study_alb" {
   name               = "aws-study-alb"
   internal           = false
   load_balancer_type = "application"
-  
+
   # セキュリティグループ（security.tfで作成したもの）
-  security_groups    = [aws_security_group.alb_sg.id]
-  
+  security_groups = [aws_security_group.alb_sg.id]
+
   # サブネット（network.tfで作成したパブリックサブネット2つ）
-  subnets            = [
+  subnets = [
     aws_subnet.public_1a.id,
     aws_subnet.public_1c.id
   ]
@@ -25,7 +25,7 @@ resource "aws_lb" "study_alb" {
 # ----------------------------
 resource "aws_lb_target_group" "study_tg" {
   name     = "aws-study-tg"
-  port     = 8080            # アプリは8080番で待ち受ける想定
+  port     = 8080 # アプリは8080番で待ち受ける想定
   protocol = "HTTP"
   vpc_id   = aws_vpc.study_vpc.id
 

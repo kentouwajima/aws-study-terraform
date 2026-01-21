@@ -1,0 +1,56 @@
+name: Terraform CI
+
+on:
+  push:
+    branches:
+      - main  # mainにマージされた時（CD用）だけpushで動かす
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    name: Run Terraform Test
+    runs-on: ubuntu-latest
+
+    # 環境変数の設定
+    env:
+      # AWS認証情報 (Secretsから読み込み)
+      AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
+      AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+      AWS_REGION: "ap-northeast-1"
+      
+      # ★重要: database.tf で必要な変数をここで渡します
+      # テスト(plan)のみなので、ダミーの値でOKです。
+      # もし本番用の値を使いたい場合は Secrets に登録して ${{ secrets.DB_PASSWORD }} とします。
+      TF_VAR_db_password: "dummy_password_for_test"
+      
+      # 変数 alert_email も default がなければここで TF_VAR_alert_email を定義する必要があります
+
+    steps:
+      # 1. コードのチェックアウト
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      # 2. Terraformのインストール
+      - name: Setup Terraform
+        uses: hashicorp/setup-terraform@v3
+        with:
+          terraform_version: 1.14.3 # ローカルで使用しているバージョンに合わせてください
+
+      # 3. 初期化
+      - name: Terraform Init
+        run: terraform init
+
+      # 4. フォーマットチェック (コードが汚いとエラーにする)
+      - name: Terraform Format
+        run: terraform fmt -check
+
+      # 5. 構文チェック
+      - name: Terraform Validate
+        run: terraform validate
+
+      # 6. テスト実行 (ここが今回のメイン！)
+      # tests/ フォルダ内の .tftest.hcl をすべて実行します
+      - name: Run Terraform Test
+        run: terraform test

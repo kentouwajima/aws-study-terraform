@@ -37,7 +37,7 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: 1.9.0 # ローカルで使用しているバージョンに合わせてください
+          terraform_version: 1.14.3 # ローカルで使用しているバージョンに合わせてください
 
       # 3. 初期化
       - name: Terraform Init

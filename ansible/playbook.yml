@@ -35,13 +35,19 @@
         name: git
         state: present
 
-    # MySQL 8.4 リポジトリの追加
+    # 403エラー回避のため、一旦/tmpにダウンロードしてからインストールします
+    - name: Download MySQL 8.4 Repository RPM
+      ansible.builtin.get_url:
+        url: https://dev.mysql.com/get/mysql84-community-release-el9-1.noarch.rpm
+        dest: /tmp/mysql84-community-release-el9-1.noarch.rpm
+        mode: '0644'
+
     - name: Install MySQL 8.4 Community Repository
       ansible.builtin.dnf:
-        name: https://dev.mysql.com/get/mysql84-community-release-el9-1.noarch.rpm
+        name: /tmp/mysql84-community-release-el9-1.noarch.rpm
         state: present
         disable_gpg_check: yes
-
+        
     # MySQLクライアントのインストール
     - name: Install MySQL Client
       ansible.builtin.dnf:

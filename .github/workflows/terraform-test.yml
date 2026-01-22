@@ -1,56 +1,65 @@
-name: Terraform CI
+name: Terraform CI/CD
 
 on:
+  # 本番反映 (CD) 用: mainへのマージ時
   push:
     branches:
-      - main  # mainにマージされた時（CD用）だけpushで動かす
+      - main
+  # 事前検証 (CI) 用: プルリクエスト作成・更新時
   pull_request:
     branches:
       - main
 
 jobs:
-  test:
-    name: Run Terraform Test
+  terraform:
+    name: Terraform CI/CD
     runs-on: ubuntu-latest
 
     # 環境変数の設定
     env:
-      # AWS認証情報 (Secretsから読み込み)
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       AWS_REGION: "ap-northeast-1"
-      
-      # ★重要: database.tf で必要な変数をここで渡します
-      # テスト(plan)のみなので、ダミーの値でOKです。
-      # もし本番用の値を使いたい場合は Secrets に登録して ${{ secrets.DB_PASSWORD }} とします。
-      TF_VAR_db_password: "dummy_password_for_test"
-      
-      # 変数 alert_email も default がなければここで TF_VAR_alert_email を定義する必要があります
+      # ★ここが重要: GitHub Secretsから本番用パスワードを受け取る
+      TF_VAR_db_password: ${{ secrets.TF_VAR_db_password }}
 
     steps:
-      # 1. コードのチェックアウト
       - name: Checkout Code
         uses: actions/checkout@v4
 
-      # 2. Terraformのインストール
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: 1.14.3 # ローカルで使用しているバージョンに合わせてください
+          terraform_version: 1.14.3 # ローカルと合わせる
 
-      # 3. 初期化
+      # 初期化 (ここでS3の管理簿を見に行きます)
       - name: Terraform Init
         run: terraform init
 
-      # 4. フォーマットチェック (コードが汚いとエラーにする)
       - name: Terraform Format
         run: terraform fmt -check
 
-      # 5. 構文チェック
       - name: Terraform Validate
         run: terraform validate
 
-      # 6. テスト実行 (ここが今回のメイン！)
-      # tests/ フォルダ内の .tftest.hcl をすべて実行します
+      # テスト実行 (常に実行して品質担保)
+      # ※Apply時はこの段階でダミーPWではなく本番PWが使われますが、
+      # テスト内容(SGやVPC)には影響しないため問題ありません。
       - name: Run Terraform Test
         run: terraform test
+
+      # ---------------------------------------------------
+      # CD (Deploy) セクション
+      # ---------------------------------------------------
+      
+      # Plan: 変更内容の確認
+      # CI(PR時)でもCD(Push時)でも、何が起きるかログに残すために実行
+      - name: Terraform Plan
+        id: plan
+        run: terraform plan -no-color -input=false
+
+      # Apply: 本番反映
+      # 条件: "mainブランチへのPush（＝マージ後）" の時だけ実行
+      - name: Terraform Apply
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: terraform apply -auto-approve -input=false

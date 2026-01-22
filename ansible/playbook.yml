@@ -1,35 +1,118 @@
-- name: Setup Web Server
+- name: Setup Web Server and App
   hosts: all
   user: ec2-user
-  become: true # 管理者権限(sudo)で実行
+  become: true # sudo権限で実行
+
+  vars:
+    ansible_python_interpreter: /usr/bin/python3
+    # ★指定のリポジトリURLを設定しました
+    app_repo_url: "https://github.com/koujienami/aws-study.git"
+    # アプリケーションを配置するディレクトリ
+    app_dir: "/home/ec2-user/aws-study"
 
   tasks:
-    # 1. 接続確認
+    # -----------------------------------------------
+    # 1. 接続確認 & OS基本設定
+    # -----------------------------------------------
     - name: Ping the server
       ansible.builtin.ping:
 
-    # 2. パッケージの更新
     - name: Update all packages
-      ansible.builtin.yum:
+      ansible.builtin.dnf:
         name: "*"
         state: latest
 
-    # 3. Java 21 (Amazon Corretto) のインストール
-    # ここでご希望のパッケージを指定します
+    # -----------------------------------------------
+    # 2. ミドルウェアのインストール
+    # -----------------------------------------------
     - name: Install Java 21
-      ansible.builtin.yum:
+      ansible.builtin.dnf:
         name: java-21-amazon-corretto-devel
         state: present
 
-    # 4. インストール確認 (java -version を実行)
-    # 実行結果を変数 'java_result' に保存します
+    - name: Install Git
+      ansible.builtin.dnf:
+        name: git
+        state: present
+
+    # MySQL 8.4 リポジトリの追加
+    - name: Install MySQL 8.4 Community Repository
+      ansible.builtin.dnf:
+        name: https://dev.mysql.com/get/mysql84-community-release-el9-1.noarch.rpm
+        state: present
+        disable_gpg_check: yes
+
+    # MySQLクライアントのインストール
+    - name: Install MySQL Client
+      ansible.builtin.dnf:
+        name:
+          - mysql
+          - mysql-community-client
+        state: present
+
+    # -----------------------------------------------
+    # 3. アプリケーションのデプロイ
+    # -----------------------------------------------
+    
+    # クリーンインストールのために既存フォルダがあれば削除
+    - name: Remove existing app directory
+      ansible.builtin.file:
+        path: "{{ app_dir }}"
+        state: absent
+
+    # Git Clone (指定のリポジトリから取得)
+    - name: Clone SpringBoot Repository
+      ansible.builtin.git:
+        repo: "{{ app_repo_url }}"
+        dest: "{{ app_dir }}"
+        version: main
+        force: yes
+
+    # ★ここが重要！
+    # gradlewに実行権限(chmod +x 相当)を付与します
+    # これにより「権限がなくて実行できない」エラーを防ぎます
+    - name: Grant execute permission to gradlew
+      ansible.builtin.file:
+        path: "{{ app_dir }}/gradlew"
+        mode: '0755'
+
+    # -----------------------------------------------
+    # 4. アプリケーションの起動
+    # -----------------------------------------------
+    
+    # 二重起動防止：もし既にJavaが動いていたら停止
+    - name: Stop existing Java process
+      ansible.builtin.shell: "pkill -f 'java -jar' || true"
+      ignore_errors: true
+
+    # アプリ起動 (バックグラウンド実行)
+    # async: 45 / poll: 0 により、起動コマンドを投げたら結果を待たずにAnsibleを正常終了させます
+    # これにより、GitHub Actionsがタイムアウトするのを防ぎます
+    - name: Start SpringBoot App (gradlew bootRun)
+      ansible.builtin.shell: |
+        nohup ./gradlew bootRun > app.log 2>&1 &
+      args:
+        chdir: "{{ app_dir }}"
+      async: 45
+      poll: 0
+
+    # -----------------------------------------------
+    # 5. インストール確認
+    # -----------------------------------------------
     - name: Check Java version
       ansible.builtin.command: java -version
       register: java_result
-      changed_when: false # 変更がないコマンドなので「changed」と判定させない設定
+      changed_when: false
 
-    # 5. ログにバージョンを表示
-    # GitHub Actionsの画面でこれを見ることで成功を確認します
     - name: Print Java version
       ansible.builtin.debug:
         var: java_result.stderr_lines
+
+    - name: Check MySQL Client version
+      ansible.builtin.command: mysql --version
+      register: mysql_result
+      changed_when: false
+
+    - name: Print MySQL version
+      ansible.builtin.debug:
+        var: mysql_result.stdout

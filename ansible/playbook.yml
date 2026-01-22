@@ -1,13 +1,11 @@
 - name: Setup Web Server and App
   hosts: all
   user: ec2-user
-  become: true # sudo権限で実行
+  become: true
 
   vars:
     ansible_python_interpreter: /usr/bin/python3
-    # ★指定のリポジトリURLを設定しました
     app_repo_url: "https://github.com/koujienami/aws-study.git"
-    # アプリケーションを配置するディレクトリ
     app_dir: "/home/ec2-user/aws-study"
 
   tasks:
@@ -17,10 +15,11 @@
     - name: Ping the server
       ansible.builtin.ping:
 
-    - name: Update all packages
-      ansible.builtin.dnf:
-        name: "*"
-        state: latest
+    # OSアップデートは時間がかかる場合があるため、必要なければコメントアウトのままでOK
+    # - name: Update all packages
+    #   ansible.builtin.dnf:
+    #     name: "*"
+    #     state: latest
 
     # -----------------------------------------------
     # 2. ミドルウェアのインストール
@@ -35,44 +34,21 @@
         name: git
         state: present
 
-    # ----------------------------------------------------------------
-    # 修正: get_urlモジュールだとブロックされるため、curlコマンドを直接実行する
-    # ----------------------------------------------------------------
-    - name: Download MySQL 8.4 Repository RPM (using curl)
-      ansible.builtin.shell: |
-        curl -L \
-        -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" \
-        -o /tmp/mysql84-community-release-el9-1.noarch.rpm \
-        https://dev.mysql.com/get/mysql84-community-release-el9-1.noarch.rpm
-      args:
-        # すでにファイルがあれば再実行しない（冪等性の担保）
-        creates: /tmp/mysql84-community-release-el9-1.noarch.rpm
-
-    - name: Install MySQL 8.4 Community Repository
+    # ★ここを修正: 外部サイトからはDLせず、AWS標準のMariaDB(MySQL互換)を入れる
+    # これでダウンロードエラーや403は絶対に起きません
+    - name: Install MySQL Client (MariaDB)
       ansible.builtin.dnf:
-        name: /tmp/mysql84-community-release-el9-1.noarch.rpm
-        state: present
-        disable_gpg_check: yes
-        
-    # MySQLクライアントのインストール
-    - name: Install MySQL Client
-      ansible.builtin.dnf:
-        name:
-          - mysql
-          - mysql-community-client
+        name: mariadb105
         state: present
 
     # -----------------------------------------------
     # 3. アプリケーションのデプロイ
     # -----------------------------------------------
-    
-    # クリーンインストールのために既存フォルダがあれば削除
     - name: Remove existing app directory
       ansible.builtin.file:
         path: "{{ app_dir }}"
         state: absent
 
-    # Git Clone (指定のリポジトリから取得)
     - name: Clone SpringBoot Repository
       ansible.builtin.git:
         repo: "{{ app_repo_url }}"
@@ -80,9 +56,6 @@
         version: main
         force: yes
 
-    # ★ここが重要！
-    # gradlewに実行権限(chmod +x 相当)を付与します
-    # これにより「権限がなくて実行できない」エラーを防ぎます
     - name: Grant execute permission to gradlew
       ansible.builtin.file:
         path: "{{ app_dir }}/gradlew"
@@ -91,15 +64,10 @@
     # -----------------------------------------------
     # 4. アプリケーションの起動
     # -----------------------------------------------
-    
-    # 二重起動防止：もし既にJavaが動いていたら停止
     - name: Stop existing Java process
       ansible.builtin.shell: "pkill -f 'java -jar' || true"
       ignore_errors: true
 
-    # アプリ起動 (バックグラウンド実行)
-    # async: 45 / poll: 0 により、起動コマンドを投げたら結果を待たずにAnsibleを正常終了させます
-    # これにより、GitHub Actionsがタイムアウトするのを防ぎます
     - name: Start SpringBoot App (gradlew bootRun)
       ansible.builtin.shell: |
         nohup ./gradlew bootRun > app.log 2>&1 &
@@ -120,6 +88,7 @@
       ansible.builtin.debug:
         var: java_result.stderr_lines
 
+    # MariaDBを入れてもコマンドは 'mysql' のまま使えます
     - name: Check MySQL Client version
       ansible.builtin.command: mysql --version
       register: mysql_result

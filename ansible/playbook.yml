@@ -35,20 +35,18 @@
         name: git
         state: present
 
-    # 403エラー & タイムアウト回避のための設定
-    # ブラウザのふりをしつつ、失敗しても3回まで再挑戦します
-    - name: Download MySQL 8.4 Repository RPM
-      ansible.builtin.get_url:
-        url: https://dev.mysql.com/get/mysql84-community-release-el9-1.noarch.rpm
-        dest: /tmp/mysql84-community-release-el9-1.noarch.rpm
-        mode: '0644'
-        timeout: 120           # 待ち時間を120秒に延長
-        headers:               # Chromeブラウザのふりをする設定
-          User-Agent: "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36"
-      register: download_result
-      until: download_result is success # 成功するまで繰り返す条件
-      retries: 3               # 最大3回リトライ
-      delay: 10                # リトライ前に10秒待つ
+    # ----------------------------------------------------------------
+    # 修正: get_urlモジュールだとブロックされるため、curlコマンドを直接実行する
+    # ----------------------------------------------------------------
+    - name: Download MySQL 8.4 Repository RPM (using curl)
+      ansible.builtin.shell: |
+        curl -L \
+        -A "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/91.0.4472.124 Safari/537.36" \
+        -o /tmp/mysql84-community-release-el9-1.noarch.rpm \
+        https://dev.mysql.com/get/mysql84-community-release-el9-1.noarch.rpm
+      args:
+        # すでにファイルがあれば再実行しない（冪等性の担保）
+        creates: /tmp/mysql84-community-release-el9-1.noarch.rpm
 
     - name: Install MySQL 8.4 Community Repository
       ansible.builtin.dnf:

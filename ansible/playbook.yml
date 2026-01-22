@@ -1,0 +1,35 @@
+- name: Setup Web Server
+  hosts: all
+  user: ec2-user
+  become: true # 管理者権限(sudo)で実行
+
+  tasks:
+    # 1. 接続確認
+    - name: Ping the server
+      ansible.builtin.ping:
+
+    # 2. パッケージの更新
+    - name: Update all packages
+      ansible.builtin.yum:
+        name: "*"
+        state: latest
+
+    # 3. Java 21 (Amazon Corretto) のインストール
+    # ここでご希望のパッケージを指定します
+    - name: Install Java 21
+      ansible.builtin.yum:
+        name: java-21-amazon-corretto-devel
+        state: present
+
+    # 4. インストール確認 (java -version を実行)
+    # 実行結果を変数 'java_result' に保存します
+    - name: Check Java version
+      ansible.builtin.command: java -version
+      register: java_result
+      changed_when: false # 変更がないコマンドなので「changed」と判定させない設定
+
+    # 5. ログにバージョンを表示
+    # GitHub Actionsの画面でこれを見ることで成功を確認します
+    - name: Print Java version
+      ansible.builtin.debug:
+        var: java_result.stderr_lines

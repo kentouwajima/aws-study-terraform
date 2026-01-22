@@ -1,11 +1,9 @@
 name: Terraform CI/CD
 
 on:
-  # 本番反映 (CD) 用: mainへのマージ時
   push:
     branches:
       - main
-  # 事前検証 (CI) 用: プルリクエスト作成・更新時
   pull_request:
     branches:
       - main
@@ -15,12 +13,10 @@ jobs:
     name: Terraform CI/CD
     runs-on: ubuntu-latest
 
-    # 環境変数の設定
     env:
       AWS_ACCESS_KEY_ID: ${{ secrets.AWS_ACCESS_KEY_ID }}
       AWS_SECRET_ACCESS_KEY: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
       AWS_REGION: "ap-northeast-1"
-      # ★ここが重要: GitHub Secretsから本番用パスワードを受け取る
       TF_VAR_db_password: ${{ secrets.TF_VAR_db_password }}
 
     steps:
@@ -30,9 +26,8 @@ jobs:
       - name: Setup Terraform
         uses: hashicorp/setup-terraform@v3
         with:
-          terraform_version: 1.14.3 # ローカルと合わせる
+          terraform_version: 1.14.3
 
-      # 初期化 (ここでS3の管理簿を見に行きます)
       - name: Terraform Init
         run: terraform init
 
@@ -42,24 +37,56 @@ jobs:
       - name: Terraform Validate
         run: terraform validate
 
-      # テスト実行 (常に実行して品質担保)
-      # ※Apply時はこの段階でダミーPWではなく本番PWが使われますが、
-      # テスト内容(SGやVPC)には影響しないため問題ありません。
       - name: Run Terraform Test
         run: terraform test
 
       # ---------------------------------------------------
-      # CD (Deploy) セクション
+      # CD (Deploy) Section
       # ---------------------------------------------------
       
-      # Plan: 変更内容の確認
-      # CI(PR時)でもCD(Push時)でも、何が起きるかログに残すために実行
       - name: Terraform Plan
         id: plan
         run: terraform plan -no-color -input=false
 
-      # Apply: 本番反映
-      # 条件: "mainブランチへのPush（＝マージ後）" の時だけ実行
       - name: Terraform Apply
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         run: terraform apply -auto-approve -input=false
+
+      # ---------------------------------------------------
+      # Ansible Configuration Management
+      # ---------------------------------------------------
+
+      # 1. IPアドレスの取得
+      # TerraformのOutputからEC2のIPを取り出し、環境変数に保存します
+      - name: Get EC2 Public IP
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        id: get_ip
+        run: |
+          echo "EC2_IP=$(terraform output -raw ec2_public_ip)" >> $GITHUB_ENV
+
+      # 2. Ansibleのインストール
+      # Pythonのパッケージマネージャ(pip)を使ってAnsibleを入れます
+      - name: Install Ansible
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          pip install ansible
+
+      # 3. SSH鍵の生成
+      # Secretsに登録した鍵をファイルとして書き出し、権限を600(自分だけ読み書き可)にします
+      - name: Create SSH Key
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          echo "${{ secrets.SSH_PRIVATE_KEY }}" > private_key.pem
+          chmod 600 private_key.pem
+
+      # 4. Ansible Playbookの実行
+      # -u: ユーザー名(Amazon Linux 2023はec2-user)
+      # --private-key: 鍵ファイルの指定
+      # -i: インベントリ(接続先)。末尾にカンマをつけると「ファイルじゃなくてIPだよ」という合図になります
+      # ANSIBLE_HOST_KEY_CHECKING=False: 「初めて接続するけど本当にいい？」という確認をスキップします
+      - name: Run Ansible Playbook
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        env:
+          ANSIBLE_HOST_KEY_CHECKING: "False"
+        run: |
+          ansible-playbook -i "${{ env.EC2_IP }}," -u ec2-user --private-key private_key.pem ansible/playbook.yml

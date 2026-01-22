@@ -53,40 +53,61 @@ jobs:
         run: terraform apply -auto-approve -input=false
 
       # ---------------------------------------------------
-      # Ansible Configuration Management
+      # Ansible Configuration Management (Dynamic Security Group)
       # ---------------------------------------------------
 
-      # 1. IPアドレスの取得
-      # TerraformのOutputからEC2のIPを取り出し、環境変数に保存します
-      - name: Get EC2 Public IP
+      # 1. 環境変数のセットアップ (IP取得, 鍵作成)
+      # 自身のIP、EC2のIP、SGのIDを取得し、SSH鍵ファイルもここで作成します
+      - name: Configure Dynamic IP & Secrets
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        id: get_ip
+        id: config_dynamic_env
         run: |
+          # 自分のグローバルIPを調べる
+          MY_IP=$(curl -s http://checkip.amazonaws.com)
+          echo "DETECTED_IP=$MY_IP" >> $GITHUB_ENV
+          
+          # Terraform Outputから情報を取得
           echo "EC2_IP=$(terraform output -raw ec2_public_ip)" >> $GITHUB_ENV
-
-      # 2. Ansibleのインストール
-      # Pythonのパッケージマネージャ(pip)を使ってAnsibleを入れます
-      - name: Install Ansible
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        run: |
-          pip install ansible
-
-      # 3. SSH鍵の生成
-      # Secretsに登録した鍵をファイルとして書き出し、権限を600(自分だけ読み書き可)にします
-      - name: Create SSH Key
-        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
-        run: |
+          echo "SG_ID=$(terraform output -raw security_group_id)" >> $GITHUB_ENV
+          
+          # SSH鍵の生成
           echo "${{ secrets.SSH_PRIVATE_KEY }}" > private_key.pem
           chmod 600 private_key.pem
 
+      # 2. セキュリティグループに穴を開ける (自分のIPだけ許可)
+      - name: Authorize Security Group Ingress
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          echo "Adding IP ${{ env.DETECTED_IP }} to Security Group ${{ env.SG_ID }}"
+          aws ec2 authorize-security-group-ingress \
+            --group-id ${{ env.SG_ID }} \
+            --protocol tcp \
+            --port 22 \
+            --cidr ${{ env.DETECTED_IP }}/32
+
+      # 3. Ansibleのインストール
+      - name: Install Ansible
+        if: github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: pip install ansible
+
       # 4. Ansible Playbookの実行
-      # -u: ユーザー名(Amazon Linux 2023はec2-user)
-      # --private-key: 鍵ファイルの指定
-      # -i: インベントリ(接続先)。末尾にカンマをつけると「ファイルじゃなくてIPだよ」という合図になります
-      # ANSIBLE_HOST_KEY_CHECKING=False: 「初めて接続するけど本当にいい？」という確認をスキップします
       - name: Run Ansible Playbook
         if: github.ref == 'refs/heads/main' && github.event_name == 'push'
         env:
           ANSIBLE_HOST_KEY_CHECKING: "False"
         run: |
+          # IP許可反映のタイムラグ対策として少し待つ
+          sleep 10
           ansible-playbook -i "${{ env.EC2_IP }}," -u ec2-user --private-key private_key.pem ansible/playbook.yml
+
+      # 5. セキュリティグループの穴を塞ぐ (必ず実行)
+      # 「if: always()」をつけることで、Ansibleがエラーになっても必ず実行され、開けっ放しを防ぎます
+      - name: Revoke Security Group Ingress
+        if: always() && github.ref == 'refs/heads/main' && github.event_name == 'push'
+        run: |
+          echo "Removing IP ${{ env.DETECTED_IP }} from Security Group ${{ env.SG_ID }}"
+          aws ec2 revoke-security-group-ingress \
+            --group-id ${{ env.SG_ID }} \
+            --protocol tcp \
+            --port 22 \
+            --cidr ${{ env.DETECTED_IP }}/32

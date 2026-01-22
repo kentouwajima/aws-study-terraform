@@ -41,6 +41,7 @@
         url: https://dev.mysql.com/get/mysql84-community-release-el9-1.noarch.rpm
         dest: /tmp/mysql84-community-release-el9-1.noarch.rpm
         mode: '0644'
+        timeout: 60 # ★これを追加！(デフォルトは10秒なので60秒に延長)
 
     - name: Install MySQL 8.4 Community Repository
       ansible.builtin.dnf:

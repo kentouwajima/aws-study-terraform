@@ -1,7 +1,7 @@
 - name: Setup Web Server and App
   hosts: all
   user: ec2-user
-  become: true  # 基本は root (sudo) で実行する設定のままにする
+  become: true  # 基本は root (sudo) で実行
 
   vars:
     ansible_python_interpreter: /usr/bin/python3
@@ -10,15 +10,14 @@
 
   tasks:
     # -----------------------------------------------
-    # 1. 接続確認 & OS基本設定 (Root権限が必要)
+    # 1. 接続確認 & OS基本設定
     # -----------------------------------------------
     - name: Ping the server
       ansible.builtin.ping:
 
     # -----------------------------------------------
-    # 2. ミドルウェアのインストール (Root権限が必要)
+    # 2. ミドルウェアのインストール
     # -----------------------------------------------
-    # dnf/yum は root 権限必須なので、become: true (デフォルト) のままでOK
     - name: Install Java 21
       ansible.builtin.dnf:
         name: java-21-amazon-corretto-devel
@@ -29,44 +28,54 @@
         name: git
         state: present
 
+    # ★修正ポイント: OSによってパッケージ名を切り替える
+    # Amazon Linux 2023 の場合
+    - name: Set MariaDB package name for Amazon Linux 2023
+      ansible.builtin.set_fact:
+        mariadb_pkg: "mariadb105"
+      when: ansible_distribution == "Amazon" and ansible_distribution_major_version == "2023"
+
+    # それ以外（Amazon Linux 2など）の場合のデフォルト設定
+    - name: Set MariaDB package name for others
+      ansible.builtin.set_fact:
+        mariadb_pkg: "mariadb"
+      when: mariadb_pkg is not defined
+
+    # 変数を使ってインストール（ハードコーディング回避）
     - name: Install MySQL Client (MariaDB)
       ansible.builtin.dnf:
-        name: mariadb105
+        name: "{{ mariadb_pkg }}"
         state: present
 
     # -----------------------------------------------
     # 3. アプリケーションのデプロイ
     # -----------------------------------------------
-    # 以前の実行で root 所有のディレクトリができている可能性があるため、
-    # 削除だけは root (become: true) で強行する
     - name: Remove existing app directory
       ansible.builtin.file:
         path: "{{ app_dir }}"
         state: absent
 
-    # ★修正ポイント: ここからは ec2-user として実行する
     - name: Clone SpringBoot Repository
       ansible.builtin.git:
         repo: "{{ app_repo_url }}"
         dest: "{{ app_dir }}"
         version: main
         force: yes
-      become_user: ec2-user  # ★ec2-userとして実行（ファイル所有者がec2-userになる）
+      become_user: ec2-user  # ★ec2-user権限で実行
 
     - name: Grant execute permission to gradlew
       ansible.builtin.file:
         path: "{{ app_dir }}/gradlew"
         mode: '0755'
-      become_user: ec2-user  # ★ec2-userとして実行
+      become_user: ec2-user  # ★ec2-user権限で実行
 
     # -----------------------------------------------
     # 4. アプリケーションの起動
     # -----------------------------------------------
-    # プロセス操作もアプリ所有者である ec2-user で行う
     - name: Stop existing Java process
       ansible.builtin.shell: "pkill -f 'java -jar' || true"
       ignore_errors: true
-      become_user: ec2-user  # ★ec2-userとして実行
+      become_user: ec2-user  # ★ec2-user権限で実行
 
     - name: Start SpringBoot App (gradlew bootRun)
       ansible.builtin.shell: |
@@ -75,7 +84,7 @@
         chdir: "{{ app_dir }}"
       async: 45
       poll: 0
-      become_user: ec2-user  # ★ec2-userとして実行（ログもプロセスもec2-user所有になる）
+      become_user: ec2-user  # ★ec2-user権限で実行
 
     # -----------------------------------------------
     # 5. インストール確認
@@ -84,7 +93,7 @@
       ansible.builtin.command: java -version
       register: java_result
       changed_when: false
-      become_user: ec2-user # 確認コマンドも一般ユーザーで行うのが無難
+      become_user: ec2-user
 
     - name: Print Java version
       ansible.builtin.debug:

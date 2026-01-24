@@ -10,6 +10,14 @@
 
   tasks:
     # -----------------------------------------------
+    # 0. SSH接続待機 (起動直後の接続エラー回避)
+    # -----------------------------------------------
+    - name: Wait for SSH connection
+      ansible.builtin.wait_for_connection:
+        delay: 0
+        timeout: 300
+
+    # -----------------------------------------------
     # 1. 接続確認 & OS基本設定
     # -----------------------------------------------
     - name: Ping the server
@@ -28,20 +36,17 @@
         name: git
         state: present
 
-    # ★修正ポイント: OSによってパッケージ名を切り替える
-    # Amazon Linux 2023 の場合
+    # OSによってMariaDBのパッケージ名を切り替える
     - name: Set MariaDB package name for Amazon Linux 2023
       ansible.builtin.set_fact:
         mariadb_pkg: "mariadb105"
       when: ansible_distribution == "Amazon" and ansible_distribution_major_version == "2023"
 
-    # それ以外（Amazon Linux 2など）の場合のデフォルト設定
     - name: Set MariaDB package name for others
       ansible.builtin.set_fact:
         mariadb_pkg: "mariadb"
       when: mariadb_pkg is not defined
 
-    # 変数を使ってインストール（ハードコーディング回避）
     - name: Install MySQL Client (MariaDB)
       ansible.builtin.dnf:
         name: "{{ mariadb_pkg }}"
@@ -61,40 +66,57 @@
         dest: "{{ app_dir }}"
         version: main
         force: yes
-      become_user: ec2-user  # ★ec2-user権限で実行
+      become_user: ec2-user  # git cloneは ec2-user で行う
 
     - name: Grant execute permission to gradlew
       ansible.builtin.file:
         path: "{{ app_dir }}/gradlew"
         mode: '0755'
-      become_user: ec2-user  # ★ec2-user権限で実行
-
-    # -----------------------------------------------
-    # 4. アプリケーションの起動
-    # -----------------------------------------------
-    - name: Stop existing Java process
-      ansible.builtin.shell: "pkill -f 'java -jar' || true"
-      ignore_errors: true
-      become_user: ec2-user  # ★ec2-user権限で実行
-
-    - name: Start SpringBoot App (gradlew bootRun)
-      ansible.builtin.shell: |
-        nohup ./gradlew bootRun > app.log 2>&1 &
-      args:
-        chdir: "{{ app_dir }}"
-      async: 45
-      poll: 0
-      become_user: ec2-user  # ★ec2-user権限で実行
-
-    # -----------------------------------------------
-    # 5. インストール確認
-    # -----------------------------------------------
-    - name: Check Java version
-      ansible.builtin.command: java -version
-      register: java_result
-      changed_when: false
       become_user: ec2-user
 
-    - name: Print Java version
-      ansible.builtin.debug:
-        var: java_result.stderr_lines
+    # -----------------------------------------------
+    # 4. Systemd設定ファイルの作成 (ここが今回最大の変更点)
+    # -----------------------------------------------
+    - name: Create Systemd Unit file for SpringBoot App
+      ansible.builtin.copy:
+        dest: /etc/systemd/system/webapp.service
+        content: |
+          [Unit]
+          Description=Spring Boot Application
+          After=network.target
+
+          [Service]
+          User=ec2-user
+          Group=ec2-user
+          WorkingDirectory={{ app_dir }}
+          ExecStart={{ app_dir }}/gradlew bootRun
+          Restart=always
+          RestartSec=10
+          StandardOutput=syslog
+          StandardError=syslog
+          SyslogIdentifier=webapp
+
+          [Install]
+          WantedBy=multi-user.target
+        mode: '0644'
+      # このタスクは /etc 配下に書くので root (become: true) のままでOK
+
+    # -----------------------------------------------
+    # 5. アプリケーションの起動 (Systemd経由)
+    # -----------------------------------------------
+    - name: Enable and start WebApp service
+      ansible.builtin.systemd:
+        name: webapp
+        state: restarted  # コード更新時は再起動したいので restarted
+        enabled: yes      # サーバー再起動時も自動起動させる
+        daemon_reload: yes
+
+    # -----------------------------------------------
+    # 6. 起動待機（ポート8080が開くまで待つ）
+    # -----------------------------------------------
+    - name: Wait for application to start
+      ansible.builtin.wait_for:
+        port: 8080
+        delay: 15
+        timeout: 300
+        state: started
